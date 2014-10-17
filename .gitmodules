@@ -1,0 +1,3 @@
+[submodule "public/themes/coffee"]
+	path = public/themes/coffee
+	url = git@github.com:supresencia/coffee_theme_mediacenterjs.git
