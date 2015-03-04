@@ -31,7 +31,7 @@ tvApp.controller('tvCtrl', function($scope, $http, $modal,player){
 
     $scope.playEpisode = function(episode){
         $scope.playing = true;
-        playEpisode(episode, $http);
+        playEpisode(episode, $http, $scope);
     }
 
     $scope.changeSelected = function(tvshow){
@@ -43,6 +43,7 @@ tvApp.controller('tvCtrl', function($scope, $http, $modal,player){
             templateUrl: 'editModal.html',
             controller: ModalInstanceCtrl,
             size: 'md',
+            windowClass: "flexible",
             resolve: {
                 current: function () {
                     return tvshow;
@@ -197,9 +198,7 @@ tvApp.factory('player', function( $rootScope) {
 });
 
 
-function playEpisode(episode, $http){
-
-
+function playEpisode(episode, $http, scope){
     var platform = 'desktop';
     if (navigator.userAgent.match(/Android/i)) {
         platform = 'android';
@@ -210,16 +209,27 @@ function playEpisode(episode, $http){
 
     $http.get('/tv/'+episode.id+'/play/'+platform).success(function(data) {
 
-        var fileName                =  episode.fileName
+        //Get url+port
+        var url = window.location.href
+        var arr = url.split("/");
+        var result = arr[0] + "//" + arr[2];
+
+        var fileName                =  data.fileName
             , outputFile            =   fileName.replace(/ /g, "-")
             , extentionlessFile     =   outputFile.replace(/\.[^/.]+$/, "")
-            , videoUrl              =   "/data/tv/"+extentionlessFile+".mp4"
+            , videoUrl              =   result+data.outputPath
             , subtitleUrl           =   "/data/tv/"+extentionlessFile+".srt"
             , playerID              =   'player'
             , homeURL               =   '/tv/'
             , type                  =   'tv';
 
-        videoJSHandler(playerID, data, episode.id, videoUrl, subtitleUrl, episode.fileName, homeURL, 5000, type);
+        videoJSHandler(playerID, data, episode.id, videoUrl, subtitleUrl, fileName, homeURL, 5000, type);
 
+    }) .error(function (msg, code) {
+        sweetAlert({title : "",
+                    text : "The episode " +  episode.title + " could not be found",
+                    type : "error",
+                    allowOutsideClick : true});
+        scope.playing = false;
     });
 }

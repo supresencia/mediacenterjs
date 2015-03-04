@@ -19,7 +19,7 @@
 
 var express = require('express')
     , app = express()
-    , fs = require ('fs')
+    , fs = require ('fs-extra')
     , util = require('util')
     , dateFormat = require('dateformat')
     , lingua = require('lingua')
@@ -32,6 +32,10 @@ var express = require('express')
     , DeviceInfo = require('./lib/utils/device-utils')
     , fileHandler = require('./lib/utils/file-utils')
     , dbSchema = require('./lib/utils/database-schema')
+    , bodyParser = require('body-parser')
+    , static = require('serve-static')
+    , favicon = require('serve-favicon')
+    , errorHandler = require('errorhandler')
     , http = require('http')
     , os = require('os')
     , jade = require('jade')
@@ -39,7 +43,10 @@ var express = require('express')
     , configuration_handler = require('./lib/handlers/configuration-handler')
     , server = http.createServer(app)
     , io = require('./lib/utils/setup-socket')(server)
-    , methodOverride = require('method-override');
+    , methodOverride = require('method-override')
+    , logger = require('./lib/utils/logging')
+    , apps = require("./lib/utils/apps");
+
 
 var config = configuration_handler.initializeConfiguration();
 var ruleSchedule = null;
@@ -59,11 +66,11 @@ if ('development' == env) {
     app.set('view engine', 'jade');
     app.set('views', __dirname + '/views');
     app.setMaxListeners(100);
-    app.use(express.json());
-    app.use(express.urlencoded());
+    app.use(bodyParser.json());
+    app.use(bodyParser.urlencoded({ extended: true }));
     app.use(methodOverride('_method'));
-    app.use(express.static(__dirname + '/public'));
-    app.use(express.favicon(__dirname + '/public/core/favicon.ico'));
+    app.use(static(__dirname + '/public'));
+    app.use(favicon(__dirname + '/public/core/favicon.ico'));
     app.use(lingua(app, {
         defaultLocale: 'translation_' + language,
         storageKey: 'lang',
@@ -74,8 +81,7 @@ if ('development' == env) {
             secure: false
         }
     }));
-    app.use(app.router);
-    app.use(express.errorHandler({ dumpExceptions: true, showStack: true }));
+    app.use(errorHandler({ dumpExceptions: true, showStack: true }));
     app.locals.pretty = true;
     app.locals.basedir = __dirname + '/views';
 };
@@ -91,8 +97,8 @@ app.all('*', function(req, res, next) {
 
 mcjsRouting.loadRoutes(app,{ verbose: !module.parent });
 
-app.use(function(req, res) {
-    res.status(404).render('404',{ selectedTheme: config.theme});
+app.get("/apps", function(req, res) {
+    res.json(apps.getApps());
 });
 
 app.get("/", function(req, res, next) {
@@ -107,65 +113,13 @@ app.get("/", function(req, res, next) {
 
     } else {
 
-        var apps = [];
-
-        //Search core app folder for apps and check if tile icon is present
-        fs.readdirSync(__dirname + '/apps').forEach(function(name){
-
-            if (fs.existsSync(__dirname + '/public/'+name+'/tile.png')
-                ||fs.existsSync(__dirname + '/public/'+name+'/tile.svg')){
-                var obj = {
-                    appLink: name,
-                    tileLink: name
-                }
-                if(name === 'movies' && config.moviepath === ""){
-                    return;
-                } else if(name === 'music' && config.musicpath === "" ){
-                    return;
-                } else if(name === 'tv' && config.tvpath === "" ){
-                    return;
-                } else {
-                    apps.push(obj);
-                }
-            }
-
-        });
-
-        //search node_modules for plugins
-        var nodeModules = __dirname + '/node_modules';
-        var pluginPrefix = config.pluginPrefix;
-
-        fs.readdirSync(nodeModules).forEach(function(name){
-
-            //Check if the folder in the node_modules starts with the prefix
-            if(name.substr(0, pluginPrefix.length) !== pluginPrefix){
-                return;
-            }
-
-            var pluginPath = nodeModules + '/' + name;
-            if(fs.existsSync( pluginPath + '/public/tile.png')){
-                var obj = {
-                    appLink: name,
-                    tileLink: name + '/public'
-                }
-                apps.push(obj);
-            }
-
-        });
-
-        var now = new Date();
-        var time = dateFormat(now, "HH:MM");
-        var date = dateFormat(now, "dd-mm-yyyy");
         req.setMaxListeners(0);
 
         DeviceInfo.isDeviceAllowed(req, function(allowed){
             res.render('index', {
                 title: 'Homepage',
                 selectedTheme: config.theme,
-                time: time,
-                date: date,
-                allowed: allowed,
-                apps: apps
+                allowed: allowed
             });
         });
     }
@@ -191,10 +145,14 @@ app.post('/removeModule', function(req, res){
         , appDir = './apps/'+module+'/'
         , publicdir = './public/'+module+'/';
 
-    rimraf(appDir, function (e){if(e)console.log('Error removing module', e .red)});
+    rimraf(appDir, function (e){
+        if(e){
+            logger.error('Error removing module',{error: e})
+        }
+    });
     rimraf(publicdir, function (e) {
         if(e) {
-            console.log('Error removing module', e .red);
+            logger.error('Error removing module',{error:e})
         } else {
             res.redirect('/');
         }
@@ -225,20 +183,22 @@ app.post('/getScraperData', function(req, res){
         setTimeout(function(){
             tvfunctions.loadItems(req, res, serveToFrontEnd);
         },20000);
+    } else {
+        res.status(404).send();
     }
 });
 
-app.post('/clearCache', function(req, res){
+app.post('/clearCache', function(req, res) {
     var app_cache_handler = require('./lib/handlers/app-cache-handler');
     var incommingCache = req.body
         , cache = incommingCache.cache
         , tableName = cache.split(',');
 
     tableName.forEach(function(name) {
-        console.log('clearing ' + name + ' cache');
+        logger.info('clearing cache',{name : name})
         app_cache_handler.clearCache(name, function(err) {
             if (err) {
-                console.log('Error removing module', e .red);
+                logger.error('Error removing module',{error:e})
                 return res.send('Error clearing cache', e);
             }
             var schema = require('./lib/utils/database-schema');
@@ -254,14 +214,14 @@ app.get('/checkForUpdate', function(req, res){
 });
 
 app.get('/doUpdate', function(req, res){
-    console.log('First, download the latest version From Github.');
+    logger.info('First, download the latest version From Github.');
     var src = 'https://codeload.github.com/jansmolders86/mediacenterjs/zip/master';
     var output = './master.zip';
     var dir = './install'
     var options = {};
 
     fileHandler.downloadFile (src, output, options, function(output){
-        console.log('Done', output);
+        logger.info('Done', {Output: output});
         unzip(req, res, output, dir);
     });
 });
@@ -275,6 +235,10 @@ app.post('/setuppost', function(req, res){
 
 app.get('/configuration', function(req, res){
     res.send(config);
+});
+
+app.get('/ip',function(req,res){
+    res.send(getIPAddresses());
 });
 
 app.post('/submit', function(req, res){
@@ -297,22 +261,25 @@ scheduler.schedule();
 
 app.set('port', process.env.PORT || 3000);
 
-
+app.use(function(req, res) {
+    res.status(404).render('404',{ selectedTheme: config.theme});
+});
 
 // Open App socket
 if (config.port == "" || config.port == undefined ){
     var defaultPort = app.get('port');
-    console.log('First run, Setup running on localhost:' + defaultPort + "\n");
+    logger.warn('First run, Setup running on localhost:',{port: defaultPort});
     server.listen(parseInt(defaultPort));
     var url = 'http://localhost:'+defaultPort;
     open(url);
 
 } else{
     var message = "MediacenterJS listening on port:" + config.port + "\n";
-    console.log(message.green.bold);
+    logger.info(message);
     server.listen(parseInt(config.port));
 }
 
+/** Private functions **/
 
 function unzip(req, res, output, dir){
     var src = 'https://codeload.github.com/jansmolders86/mediacenterjs/zip/master';
@@ -325,7 +292,7 @@ function unzip(req, res, output, dir){
     } else {
         rimraf(dir, function (err) {
             if(err) {
-                console.log('Error removing temp folder', err .red);
+                logger.error('Error removing temp folder',{error: err });
             } else {
 
                 fileHandler.downloadFile(src, outputFile, options, function(output){
@@ -337,7 +304,7 @@ function unzip(req, res, output, dir){
             }
         });
     }
-    console.log("Unzipping New Version...");
+    logger.info("Unzipping New Version...");
     var AdmZip = require("adm-zip");
     var zip = new AdmZip(output);
     zip.extractAllTo(ExtractDir, true);
@@ -364,7 +331,3 @@ function getIPAddresses() {
 
     return ipAddresses;
 }
-
-
-
-

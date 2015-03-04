@@ -19,7 +19,7 @@
 
 (function(window) {
 
-    var musicApp = angular.module('musicApp', ['ui.bootstrap']);
+    var musicApp = angular.module('musicApp', ['ui.bootstrap', 'mcjsCore']);
 
     function createDropDirective(ngevent, jsevent) {
         musicApp.directive(ngevent, function ($parse) {
@@ -109,6 +109,7 @@
                 templateUrl: 'editModal.html',
                 controller: ModalInstanceCtrl,
                 size: 'md',
+                windowClass: "flexible",
                 resolve: {
                     current: function () {
                         return album;
@@ -183,8 +184,8 @@
 
         setupSocket.async().then(function(data) {
             if (typeof data.on !== "undefined") {
-                $scope.remote       = remote(data, $scope, player, audio);
-                $scope.keyevents    = keyevents(data, $scope, player, audio);
+                //$scope.remote       = remote(data, $scope, player, audio);
+                //$scope.keyevents    = keyevents(data, $scope, player, audio);
             }
         });
 
